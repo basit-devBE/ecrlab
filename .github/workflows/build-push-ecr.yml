@@ -1,0 +1,78 @@
+name: Build and Push to Amazon ECR
+
+on:
+  push:
+
+# Cancel any in-progress run for the same branch when a new push arrives.
+concurrency:
+  group: ecr-push-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    name: Build Docker Image and Push to ECR
+    runs-on: ubuntu-latest
+
+    # id-token:write is required for GitHub to issue an OIDC JWT.
+    # No AWS access keys are stored anywhere — authentication is
+    # handled entirely by the OIDC token exchange.
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPO_NAME: abdulmohammed-springboot
+      IMAGE_TAG: abdulmohammed_springboot
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          SHA_SHORT="$(echo '${{ github.sha }}' | cut -c1-8)"
+
+          docker build \
+            --tag "${ECR_REGISTRY}/${{ env.ECR_REPO_NAME }}:${{ env.IMAGE_TAG }}" \
+            --tag "${ECR_REGISTRY}/${{ env.ECR_REPO_NAME }}:${SHA_SHORT}" \
+            .
+
+          echo "ECR_REGISTRY=${ECR_REGISTRY}" >> $GITHUB_ENV
+          echo "SHA_SHORT=${SHA_SHORT}"        >> $GITHUB_ENV
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push "$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ env.IMAGE_TAG }}"
+          docker push "$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:$SHA_SHORT"
+
+          echo "Pushed:"
+          echo "  $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ env.IMAGE_TAG }}"
+          echo "  $ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:$SHA_SHORT"
+
+      - name: Print image digest
+        if: success()
+        run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "${{ env.ECR_REPO_NAME }}" \
+            --image-ids imageTag="${{ env.IMAGE_TAG }}" \
+            --query "imageDetails[0].imageDigest" \
+            --output text)
+          echo "Image digest: ${DIGEST}"
+
+      - name: Clean up local image on failure
+        if: failure()
+        run: |
+          docker rmi "$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ env.IMAGE_TAG }}" 2>/dev/null || true
+          docker rmi "$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:$SHA_SHORT"           2>/dev/null || true
