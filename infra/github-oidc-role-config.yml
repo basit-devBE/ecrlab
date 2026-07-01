@@ -1,8 +1,0 @@
-template-file-location: infra/github-oidc-role.yml
-parameters:
-  GitHubOrg: basit-devBE
-  GitHubRepo: ecrlab
-  ProjectTag: ecr-springboot-lab
-tags:
-  Project: ecr-springboot-lab
-  ManagedBy: CloudFormation-GitSync

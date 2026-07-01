@@ -1,9 +1,0 @@
-template-file-location: infra/ecr-repository.yml
-parameters:
-  RepositoryName: abdulmohammed-springboot
-  StudentName: Abdul Mohammed
-  ProjectTag: ecr-springboot-lab
-tags:
-  Project: ecr-springboot-lab
-  Student: Abdul Mohammed
-  ManagedBy: CloudFormation-GitSync
