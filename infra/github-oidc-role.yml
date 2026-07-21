@@ -8,11 +8,10 @@ Description: >
     1. infra/ecr-repository.yml  (this stack imports its ECR ARN output)
     2. infra/github-oidc-role.yml  (this stack)
 
-  IMPORTANT — if deployment fails with "Provider already exists":
-    The GitHub OIDC provider is already registered in this account.
-    Comment out the GitHubOIDCProvider resource and replace
-    !GetAtt GitHubOIDCProvider.Arn with the existing provider ARN:
-    arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com
+  IMPORTANT — the OIDC provider is a global IAM resource, not per-region:
+    If it's already registered in this account (e.g. from a stack deployed
+    in another region), set CreateOIDCProvider to "false" and pass its ARN
+    via ExistingOIDCProviderArn instead of creating a duplicate.
 
 Parameters:
   GitHubOrg:
@@ -27,16 +26,36 @@ Parameters:
     Type: String
     Default: ecr-springboot-lab
 
+  CreateOIDCProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Set to "false" if the GitHub OIDC provider is already registered in
+      this account (it's a global resource — only needs to exist once,
+      regardless of how many regions have a role stack).
+
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: >
+      Required when CreateOIDCProvider is "false". ARN of the existing
+      provider, e.g.
+      arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com
+
+Conditions:
+  ShouldCreateOIDCProvider: !Equals [!Ref CreateOIDCProvider, "true"]
+
 Resources:
 
   # ---------------------------------------------------------------
   # GitHub OIDC Identity Provider
   # Registers GitHub as a trusted token issuer in this AWS account.
-  # Only needs to exist once per account — see note above if it
-  # already exists.
+  # Global resource — only created when CreateOIDCProvider is "true".
   # ---------------------------------------------------------------
   GitHubOIDCProvider:
     Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOIDCProvider
     Properties:
       Url: https://token.actions.githubusercontent.com
       ClientIdList:
@@ -47,11 +66,14 @@ Resources:
 
   # ---------------------------------------------------------------
   # IAM Role — assumed by GitHub Actions via OIDC
+  # RoleName includes the region: IAM roles are global, and a second
+  # region's stack (e.g. for a relocated ECR repo) must not collide
+  # with a role already created by a stack in another region.
   # ---------------------------------------------------------------
   GitHubActionsECRRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${ProjectTag}-github-actions-ecr-role"
+      RoleName: !Sub "${ProjectTag}-github-actions-ecr-role-${AWS::Region}"
       Description: >
         Assumed by GitHub Actions via OIDC. Grants least-privilege
         permissions to push Docker images to the ECR repository.
@@ -61,7 +83,10 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !GetAtt GitHubOIDCProvider.Arn
+              Federated: !If
+                - ShouldCreateOIDCProvider
+                - !GetAtt GitHubOIDCProvider.Arn
+                - !Ref ExistingOIDCProviderArn
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
@@ -104,7 +129,7 @@ Resources:
 
       Tags:
         - Key: Name
-          Value: !Sub "${ProjectTag}-github-actions-role"
+          Value: !Sub "${ProjectTag}-github-actions-role-${AWS::Region}"
         - Key: Project
           Value: !Ref ProjectTag
         - Key: ManagedBy
