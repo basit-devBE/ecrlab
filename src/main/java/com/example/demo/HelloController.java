@@ -14,7 +14,7 @@ public class HelloController {
         return Map.of(
             "message",   "Hello from Abdul Mohammed's Spring Boot ECR Lab!",
             "student",   "Abdul Mohammed",
-            "image",     "abdulmohammed_springboot",
+            "image",     "abdulmohammed final lab_springboot",
             "timestamp", Instant.now().toString()
         );
     }
